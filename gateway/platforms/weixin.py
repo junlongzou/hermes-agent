@@ -99,6 +99,28 @@ MEDIA_VOICE = 4
 _LIVE_ADAPTERS: Dict[str, Any] = {}
 
 
+def _can_reuse_live_adapter(adapter: Any) -> bool:
+    """Return True when a live Weixin adapter can be safely reused.
+
+    ``aiohttp.ClientSession`` instances are bound to the event loop they were
+    created in. Reusing a live gateway adapter from a different loop raises
+    errors such as "Timeout context manager should be used inside a task".
+    Only reuse the in-process adapter when its send session belongs to the
+    current running loop; otherwise the caller should open a fresh session.
+    """
+    if adapter is None:
+        return False
+    send_session = getattr(adapter, "_send_session", None)
+    if send_session is None or getattr(send_session, "closed", True):
+        return False
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    session_loop = getattr(send_session, "_loop", None)
+    return session_loop is current_loop
+
+
 def _make_ssl_connector() -> Optional["aiohttp.TCPConnector"]:
     """Return a TCPConnector with a certifi CA bundle, or None if certifi is unavailable.
 
@@ -1981,8 +2003,7 @@ async def send_weixin_direct(
     context_token = token_store.get(account_id, chat_id)
 
     live_adapter = _LIVE_ADAPTERS.get(resolved_token)
-    send_session = getattr(live_adapter, '_send_session', None)
-    if live_adapter is not None and send_session is not None and not send_session.closed:
+    if _can_reuse_live_adapter(live_adapter):
         last_result: Optional[SendResult] = None
         cleaned = live_adapter.format_message(message)
         if cleaned:

@@ -5,7 +5,10 @@ import base64
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from gateway.config import PlatformConfig
 from gateway.config import GatewayConfig, HomeChannel, Platform, _apply_env_overrides
@@ -357,6 +360,39 @@ class TestWeixinChunkDelivery:
         retry = send_message_mock.await_args_list[2].kwargs
         assert first_try["text"] == retry["text"]
         assert first_try["client_id"] == retry["client_id"]
+
+
+class TestWeixinDirectSendLoopSafety:
+    @pytest.mark.asyncio
+    async def test_send_weixin_direct_skips_live_adapter_from_other_loop(self, tmp_path, monkeypatch):
+        live_adapter = SimpleNamespace(
+            _send_session=SimpleNamespace(closed=False, _loop=object()),
+            send=AsyncMock(side_effect=AssertionError("live adapter should not be reused across loops")),
+            format_message=lambda text: text,
+        )
+
+        session_cm = AsyncMock()
+        session_cm.__aenter__.return_value = session_cm
+        session_cm.__aexit__.return_value = None
+        session_cm.closed = False
+
+        temp_send = AsyncMock(return_value=SendResult(success=True, message_id="temp-msg"))
+
+        monkeypatch.setattr(weixin, "_LIVE_ADAPTERS", {"tok": live_adapter})
+        monkeypatch.setattr(weixin, "get_hermes_home", lambda: tmp_path)
+
+        with patch("aiohttp.ClientSession", return_value=session_cm), \
+             patch.object(weixin.WeixinAdapter, "send", temp_send):
+            result = await weixin.send_weixin_direct(
+                extra={"account_id": "acct"},
+                token="tok",
+                chat_id="wxid_test123",
+                message="hello from other loop",
+            )
+
+        assert result["success"] is True
+        live_adapter.send.assert_not_awaited()
+        temp_send.assert_awaited_once()
 
 
 class TestWeixinOutboundMedia:
