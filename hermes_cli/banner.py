@@ -131,13 +131,9 @@ def check_for_updates() -> Optional[int]:
     or ``None`` if the check fails or isn't applicable.
     """
     hermes_home = get_hermes_home()
-    repo_dir = hermes_home / "hermes-agent"
+    repo_dir = _resolve_repo_dir()
     cache_file = hermes_home / ".update_check"
-
-    # Must be a git repo — fall back to project root for dev installs
-    if not (repo_dir / ".git").exists():
-        repo_dir = Path(__file__).parent.parent.resolve()
-    if not (repo_dir / ".git").exists():
+    if repo_dir is None:
         return None
 
     # Read cache
@@ -185,10 +181,12 @@ def check_for_updates() -> Optional[int]:
 
 def _resolve_repo_dir() -> Optional[Path]:
     """Return the active Hermes git checkout, or None if this isn't a git install."""
+    project_root = Path(__file__).parent.parent.resolve()
+    if (project_root / ".git").exists():
+        return project_root
+
     hermes_home = get_hermes_home()
     repo_dir = hermes_home / "hermes-agent"
-    if not (repo_dir / ".git").exists():
-        repo_dir = Path(__file__).parent.parent.resolve()
     return repo_dir if (repo_dir / ".git").exists() else None
 
 

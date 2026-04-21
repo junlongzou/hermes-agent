@@ -92,6 +92,32 @@ def test_check_for_updates_fallback_to_project_root(tmp_path, monkeypatch):
     assert mock_run.call_count >= 1
 
 
+def test_check_for_updates_prefers_active_project_root_over_stale_home_repo(tmp_path, monkeypatch):
+    """Editable installs should inspect the active checkout, not a stale shared home repo."""
+    import hermes_cli.banner as banner
+
+    project_root = Path(banner.__file__).parent.parent.resolve()
+    if not (project_root / ".git").exists():
+        pytest.skip("Not running from a git checkout")
+
+    stale_repo = tmp_path / "hermes-agent"
+    stale_repo.mkdir()
+    (stale_repo / ".git").mkdir()
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(kwargs.get("cwd"))
+        return MagicMock(returncode=0, stdout="0\n")
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    with patch("hermes_cli.banner.subprocess.run", side_effect=fake_run):
+        banner.check_for_updates()
+
+    assert calls
+    assert all(Path(cwd).resolve() == project_root for cwd in calls)
+
+
 def test_prefetch_non_blocking():
     """prefetch_update_check() should return immediately without blocking."""
     import hermes_cli.banner as banner
