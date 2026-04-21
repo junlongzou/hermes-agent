@@ -132,6 +132,40 @@ class ToolRegistry:
             logger.debug("Toolset %s check raised; marking unavailable", toolset)
             return False
 
+    def _evaluate_toolset_entries(
+        self,
+        toolset: str,
+        entries: List[ToolEntry],
+        fallback_check: Callable | None = None,
+    ) -> bool:
+        """Return True when any tool in the toolset is currently usable.
+
+        Tool definitions are already filtered per-tool in ``get_definitions``.
+        Toolset-level availability should mirror that behavior so a stricter
+        specialty tool (for example ``browser_cdp``) does not mark the entire
+        toolset unavailable when the rest of the tools are ready.
+        """
+        relevant_entries = [entry for entry in entries if entry.toolset == toolset]
+        if not relevant_entries:
+            return self._evaluate_toolset_check(toolset, fallback_check)
+
+        check_results: Dict[Callable, bool] = {}
+        for entry in relevant_entries:
+            if not entry.check_fn:
+                return True
+            if entry.check_fn not in check_results:
+                try:
+                    check_results[entry.check_fn] = bool(entry.check_fn())
+                except Exception:
+                    logger.debug(
+                        "Tool %s check raised during toolset availability; marking that tool unavailable",
+                        entry.name,
+                    )
+                    check_results[entry.check_fn] = False
+            if check_results[entry.check_fn]:
+                return True
+        return False
+
     def get_entry(self, name: str) -> Optional[ToolEntry]:
         """Return a registered tool entry by name, or None."""
         with self._lock:
@@ -355,16 +389,15 @@ class ToolRegistry:
         Returns False (rather than crashing) when the check function raises
         an unexpected exception (e.g. network error, missing import, bad config).
         """
-        with self._lock:
-            check = self._toolset_checks.get(toolset)
-        return self._evaluate_toolset_check(toolset, check)
+        entries, toolset_checks = self._snapshot_state()
+        return self._evaluate_toolset_entries(toolset, entries, toolset_checks.get(toolset))
 
     def check_toolset_requirements(self) -> Dict[str, bool]:
         """Return ``{toolset: available_bool}`` for every toolset."""
         entries, toolset_checks = self._snapshot_state()
         toolsets = sorted({entry.toolset for entry in entries})
         return {
-            toolset: self._evaluate_toolset_check(toolset, toolset_checks.get(toolset))
+            toolset: self._evaluate_toolset_entries(toolset, entries, toolset_checks.get(toolset))
             for toolset in toolsets
         }
 
@@ -376,8 +409,8 @@ class ToolRegistry:
             ts = entry.toolset
             if ts not in toolsets:
                 toolsets[ts] = {
-                    "available": self._evaluate_toolset_check(
-                        ts, toolset_checks.get(ts)
+                    "available": self._evaluate_toolset_entries(
+                        ts, entries, toolset_checks.get(ts)
                     ),
                     "tools": [],
                     "description": "",
@@ -422,7 +455,7 @@ class ToolRegistry:
             if ts in seen:
                 continue
             seen.add(ts)
-            if self._evaluate_toolset_check(ts, toolset_checks.get(ts)):
+            if self._evaluate_toolset_entries(ts, entries, toolset_checks.get(ts)):
                 available.append(ts)
             else:
                 unavailable.append({
