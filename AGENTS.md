@@ -8,6 +8,14 @@ Instructions for AI coding assistants and developers working on the hermes-agent
 source venv/bin/activate  # ALWAYS activate before running Python
 ```
 
+## Cursor Cloud specific instructions
+
+Cloud Agents boot with this repo's `venv` (Python 3.11), root / `ui-tui` / `web` Node dependencies, and `hermes` on `PATH`. Provider API keys are not required for `hermes doctor`, `hermes version`, tool calls such as `read_file`, or `scripts/run_tests.sh`.
+
+- `ui-tui` `npm ci` fails on npm 10.9 because `package-lock.json` omits optional `@emnapi` packages. Use `npm install` in `ui-tui`. Tests import `@hermes/ink`, so run `npm run build --prefix ui-tui/packages/hermes-ink` before `npm test` if `dist/ink-bundle.js` is missing.
+- The sibling `grokbot-skills` checkout is a markdown skill library. It has no install or test command.
+- Do not start a gateway or dashboard on boot. Hermes is a CLI; run `hermes` commands when you need them.
+
 ## Project Structure
 
 ```
